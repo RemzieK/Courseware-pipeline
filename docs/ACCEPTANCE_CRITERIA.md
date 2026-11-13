@@ -1,0 +1,1 @@
+# ACCEPTANCE_CRITERIA – UniCloud, Екип 2
