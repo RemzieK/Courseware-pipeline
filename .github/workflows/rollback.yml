@@ -1,0 +1,20 @@
+name: Rollback
+on:
+  push:
+    branches: [rollback-demo]
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Roll back on the VM
+        env:
+          VM_HOST: ${{ secrets.VM_HOST }}
+          VM_USER: ${{ secrets.VM_USER }}
+          VM_SSH_KEY: ${{ secrets.VM_SSH_KEY }}
+        run: |
+          printf '%s\n' "$VM_SSH_KEY" > key && chmod 600 key
+          ssh -i key -o StrictHostKeyChecking=accept-new $VM_USER@$VM_HOST "cd ~/app && bash scripts/rollback.sh"
+
+      - name: Show which version is live
+        run: curl -fsS "http://${{ secrets.VM_HOST }}:8080/version.txt"
