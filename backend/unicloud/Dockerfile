@@ -1,21 +1,14 @@
-FROM maven:3.9-eclipse-temurin-21-alpine AS build
-
-WORKDIR /workspace
-
-COPY .mvn/ .mvn/
-COPY mvnw pom.xml ./
-COPY src/ src/
-
-RUN chmod +x mvnw && ./mvnw -B clean package -DskipTests
-
-FROM eclipse-temurin:21-jre-alpine
-
+FROM maven:3.9-eclipse-temurin-21 AS build
 WORKDIR /app
+COPY pom.xml .
+RUN mvn -B dependency:go-offline
+COPY src ./src
+RUN mvn -B clean package -DskipTests
 
-RUN addgroup -S spring && adduser -S spring -G spring
-COPY --from=build --chown=spring:spring /workspace/target/*.jar app.jar
-
-USER spring
+FROM eclipse-temurin:21-jre
+WORKDIR /app
+RUN useradd -r -u 1001 appuser
+COPY --from=build /app/target/*.jar app.jar
+USER appuser
 EXPOSE 8080
-
-ENTRYPOINT ["java", "-jar", "app.jar"]
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75", "-jar", "app.jar"]
