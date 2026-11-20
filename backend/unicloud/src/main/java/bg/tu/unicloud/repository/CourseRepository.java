@@ -28,4 +28,33 @@ public interface CourseRepository extends JpaRepository<Course, UUID> {
 
     @Query("SELECT c FROM Course c LEFT JOIN FETCH c.modules m LEFT JOIN FETCH m.lessons l WHERE c.id = :id")
     Optional<Course> findByIdWithStructure(@Param("id") UUID id);
+
+    @Query("""
+            SELECT c FROM Course c
+            WHERE (:archived IS NULL OR c.archived = :archived)
+              AND (:discipline IS NULL OR LOWER(c.discipline) = LOWER(:discipline))
+              AND (:semester IS NULL OR LOWER(c.semester) = LOWER(:semester))
+              AND (:teacherId IS NULL OR c.teacher.id = :teacherId)
+            """)
+    Page<Course> findWithFilters(
+            @Param("discipline") String discipline,
+            @Param("semester") String semester,
+            @Param("teacherId") UUID teacherId,
+            @Param("archived") Boolean archived,
+            Pageable pageable
+    );
+
+    @Query("""
+            SELECT c FROM Course c
+            WHERE c.archived = false
+              AND (:q IS NULL OR LOWER(c.title) LIKE LOWER(CONCAT('%', :q, '%'))
+                   OR LOWER(c.description) LIKE LOWER(CONCAT('%', :q, '%'))
+                   OR LOWER(c.code) LIKE LOWER(CONCAT('%', :q, '%')))
+              AND (:discipline IS NULL OR LOWER(c.discipline) LIKE LOWER(CONCAT('%', :discipline, '%')))
+            """)
+    Page<Course> searchCourses(
+            @Param("q") String q,
+            @Param("discipline") String discipline,
+            Pageable pageable
+    );
 }
