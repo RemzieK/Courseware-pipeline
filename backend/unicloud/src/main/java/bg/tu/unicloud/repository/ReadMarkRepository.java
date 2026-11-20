@@ -27,6 +27,14 @@ public interface ReadMarkRepository extends JpaRepository<ReadMark, UUID> {
            "WHERE rm.user.id = :userId AND c.id = :courseId")
     List<ReadMark> findByUserIdAndCourseId(@Param("userId") UUID userId, @Param("courseId") UUID courseId);
 
+    @Query("SELECT COUNT(rm) FROM ReadMark rm " +
+           "JOIN rm.material m " +
+           "JOIN m.lesson l " +
+           "JOIN l.module mod " +
+           "JOIN mod.course c " +
+           "WHERE rm.user.id = :userId AND c.id = :courseId")
+    long countByUserIdAndCourseId(@Param("userId") UUID userId, @Param("courseId") UUID courseId);
+
     void deleteByUserIdAndMaterialId(UUID userId, UUID materialId);
 }
 
