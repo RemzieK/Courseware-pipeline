@@ -24,7 +24,8 @@ import java.util.UUID;
         },
         indexes = {
                 @Index(name = "idx_courses_teacher_id", columnList = "teacher_id"),
-                @Index(name = "idx_courses_discipline_semester", columnList = "discipline, semester")
+                @Index(name = "idx_courses_discipline_semester", columnList = "discipline, semester"),
+                @Index(name = "uk_courses_external_offering", columnList = "external_course_offering_id", unique = true)
         }
 )
 @Getter
@@ -43,6 +44,9 @@ public class Course {
     @Size(max = 30)
     @Column(name = "code", length = 30, nullable = false, unique = true)
     private String code;
+
+    @Column(name = "external_course_offering_id")
+    private Long externalCourseOfferingId;
 
     @NotBlank
     @Size(max = 200)
@@ -107,4 +111,3 @@ public class Course {
         return getClass().hashCode();
     }
 }
-
