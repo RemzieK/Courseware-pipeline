@@ -1,0 +1,56 @@
+name: Deploy
+on:
+  push:
+    branches: [main, add-cicd]
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency: deploy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lowercase owner
+        id: meta
+        run: echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: deploy-demo
+          push: true
+          build-args: VERSION=${{ github.sha }}
+          tags: ghcr.io/${{ steps.meta.outputs.owner }}/unicloud-demo:${{ github.sha }}
+
+      - name: Deploy to VM
+        env:
+          VM_HOST: ${{ secrets.VM_HOST }}
+          VM_USER: ${{ secrets.VM_USER }}
+          VM_SSH_KEY: ${{ secrets.VM_SSH_KEY }}
+          OWNER: ${{ steps.meta.outputs.owner }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s\n' "$VM_SSH_KEY" > key && chmod 600 key
+          SSH="ssh -i key -o StrictHostKeyChecking=accept-new $VM_USER@$VM_HOST"
+          echo "$TOKEN" | $SSH "docker login ghcr.io -u ${{ github.actor }} --password-stdin"
+          $SSH "cd ~/app && git fetch --quiet origin && git checkout -qf ${{ github.sha }} && bash scripts/deploy.sh ${{ github.sha }} $OWNER"
+          $SSH "docker logout ghcr.io"
+
+      - name: Check the new version is live
+        run: |
+          for i in 1 2 3 4 5 6; do
+            V=$(curl -fsS "http://${{ secrets.VM_HOST }}:8080/version.txt" || true)
+            [ "$V" = "${{ github.sha }}" ] && echo "Live: $V" && exit 0
+            sleep 5
+          done
+          echo "Version check failed"; exit 1
