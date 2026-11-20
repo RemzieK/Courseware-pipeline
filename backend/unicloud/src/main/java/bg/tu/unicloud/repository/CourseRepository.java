@@ -16,6 +16,8 @@ public interface CourseRepository extends JpaRepository<Course, UUID> {
 
     Optional<Course> findByCode(String code);
 
+    Optional<Course> findByExternalCourseOfferingId(Long externalCourseOfferingId);
+
     boolean existsByCode(String code);
 
     Page<Course> findByArchivedFalse(Pageable pageable);
@@ -27,4 +29,3 @@ public interface CourseRepository extends JpaRepository<Course, UUID> {
     @Query("SELECT c FROM Course c LEFT JOIN FETCH c.modules m LEFT JOIN FETCH m.lessons l WHERE c.id = :id")
     Optional<Course> findByIdWithStructure(@Param("id") UUID id);
 }
-

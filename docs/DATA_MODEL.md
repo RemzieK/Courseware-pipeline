@@ -27,6 +27,16 @@ erDiagram
     USERS ||--o{ COURSES : "creates / teaches"
     USERS ||--o{ READ_MARKS : "marks as read"
     USERS ||--o{ MATERIAL_VERSIONS : "uploads"
+    USERS {
+        uuid id PK
+        varchar email UK
+        varchar password_hash "nullable"
+        varchar external_subject UK "OIDC sub"
+        varchar full_name
+        varchar role
+        boolean active
+        timestamptz created_at
+    }
 
     COURSES ||--o{ MODULES : "contains (ordered)"
     MODULES ||--o{ LESSONS : "contains (ordered)"
@@ -36,19 +46,13 @@ erDiagram
     MATERIALS ||--o{ READ_MARKS : "tracked by"
     MATERIALS }o--o{ TAGS : "categorized by"
 
-    USERS {
-        uuid id PK
-        varchar email UK
-        varchar password_hash
-        varchar full_name
-        varchar role
-        boolean active
-        timestamptz created_at
-    }
+    COURSES ||--o{ INTEGRATION_EVENTS : "referenced by offering ID"
+    MATERIALS ||--o{ INTEGRATION_EVENTS : "referenced by material ID"
 
     COURSES {
         uuid id PK
         varchar code UK "OIT-2026W"
+        bigint external_course_offering_id UK
         varchar title
         varchar discipline
         varchar semester
@@ -122,6 +126,23 @@ erDiagram
         int version_at_read
         timestamptz read_at
     }
+
+    INTEGRATION_EVENTS {
+        uuid id PK
+        uuid event_id UK
+        varchar event_type
+        timestamptz occurred_at
+        varchar user_alias
+        bigint course_offering_id
+        uuid material_id
+        int material_version
+        jsonb payload
+        timestamptz delivered_at
+        timestamptz next_retry_at
+        int retry_count
+        varchar status
+        text last_error
+    }
 ```
 
 ---
@@ -131,13 +152,14 @@ erDiagram
 Всички таблици използват **UUID v4** за първични ключове, осигурявайки съвместимост с `API_CONTRACTS.md` и разпределените системи (Екипи 1, 3, 4). Всички клеймове за време се съхраняват в **UTC (`TIMESTAMPTZ`)**.
 
 ### 2.1. Таблица `users`
-Съхранява демо потребителите за Седмица 1 (UC-30) с роли и хеширани пароли. Форматът на идентификатора е съвместим с `sub` от JWT токена на Екип 1.
+Съхранява потребителите и ролите им. Потребителят се свързва с OIDC чрез `external_subject`; `password_hash` остава nullable само за преходна съвместимост и не е основен механизъм за вход.
 
 | Колона | Тип | Ограничения | Описание |
 | --- | --- | --- | --- |
 | `id` | `UUID` | `PRIMARY KEY DEFAULT gen_random_uuid()` | Уникален идентификатор |
 | `email` | `VARCHAR(100)` | `NOT NULL, UNIQUE` | Потребителски имейл / вход |
-| `password_hash` | `VARCHAR(255)` | `NOT NULL` | Хеширана парола (BCrypt) |
+| `password_hash` | `VARCHAR(255)` | `NULL` | Преходна, незадължителна локална хеширана парола |
+| `external_subject` | `VARCHAR(255)` | `NULL, UNIQUE` | Външен OIDC subject; не се използва като псевдоним за webhook |
 | `full_name` | `VARCHAR(150)` | `NOT NULL` | Име и фамилия |
 | `role` | `VARCHAR(30)` | `NOT NULL, CHECK (role IN ('STUDENT', 'TEACHER', 'ADMIN', 'SERVICE'))` | Роля в системата |
 | `active` | `BOOLEAN` | `NOT NULL DEFAULT true` | Статус на профила |
@@ -145,6 +167,7 @@ erDiagram
 
 - **Индекси:**  
   - `uk_users_email` (UNIQUE B-tree) върху `email`
+  - `uk_users_external_subject` (UNIQUE B-tree) върху `external_subject`
 
 ---
 
@@ -155,6 +178,7 @@ erDiagram
 | --- | --- | --- | --- |
 | `id` | `UUID` | `PRIMARY KEY DEFAULT gen_random_uuid()` | Първичен ключ |
 | `code` | `VARCHAR(30)` | `NOT NULL, UNIQUE` | Код на курс (напр. `OIT-2026W`) |
+| `external_course_offering_id` | `BIGINT` | `NULL, UNIQUE` | Числов идентификатор на конкретното предлагане, предоставян от външната система; отделен от вътрешния UUID и `code` |
 | `title` | `VARCHAR(200)` | `NOT NULL` | Име на курса |
 | `discipline` | `VARCHAR(100)` | `NOT NULL` | Дисциплина / направление |
 | `semester` | `VARCHAR(20)` | `NOT NULL` | Семестър (напр. `2026W`, `2026S`) |
@@ -168,6 +192,7 @@ erDiagram
   - `users (1) -> courses (N)`: Връзка преподавател към курс. `ON DELETE RESTRICT` предотвратява изтриване на преподавател с активни курсове.
 - **Индекси:**  
   - `uk_courses_code` (UNIQUE B-tree) върху `code`
+  - `uk_courses_external_offering` (UNIQUE B-tree) върху `external_course_offering_id`
   - `idx_courses_teacher_id` (B-tree) върху `teacher_id`
   - `idx_courses_discipline_semester` (B-tree) върху `(discipline, semester)`
 
@@ -298,6 +323,34 @@ erDiagram
   - `uk_user_material_read` (UNIQUE B-tree) върху `(user_id, material_id)` — гарантира, че студент има най-много един запис за даден материал.
   - `idx_read_marks_user_id` (B-tree) върху `user_id` — мигновено зареждане на списъка с прочетени материали за текущия студент.
 
+### 2.9. Таблица `integration_events`
+Надежден outbox за webhook събития към Екип 4. `read_marks` остава източникът на видимото състояние „прочетено“; тази таблица пази събитията за повторно изпращане и дедупликация, а не прогреса на потребителя.
+
+| Колона | Тип | Ограничения | Описание |
+| --- | --- | --- | --- |
+| `id` | `UUID` | `PRIMARY KEY DEFAULT gen_random_uuid()` | Вътрешен ключ |
+| `event_id` | `UUID` | `NOT NULL, UNIQUE` | Идентификатор за дедупликация при получателя |
+| `event_type` | `VARCHAR(30)` | `NOT NULL` | `material.viewed`, `material.read`, `material.unread` или `material.uploaded` |
+| `occurred_at` | `TIMESTAMPTZ` | `NOT NULL` | Време на настъпване на събитието |
+| `user_alias` | `VARCHAR(255)` | `NOT NULL` | Псевдоним за интеграцията; не OIDC subject, вътрешен UUID, имейл или име |
+| `course_offering_id` | `BIGINT` | `NULL` | Външен идентификатор на предлагането |
+| `material_id` | `UUID` | `NULL` | Идентификатор на материал |
+| `material_version` | `INT` | `NULL` | Версия на материала при събитието |
+| `payload` | `JSONB` | `NOT NULL` | Тяло на webhook събитието |
+| `delivered_at` | `TIMESTAMPTZ` | `NULL` | Успешно приемане от получателя |
+| `next_retry_at` | `TIMESTAMPTZ` | `NULL` | Най-ранно време за следващ опит |
+| `retry_count` | `INT` | `NOT NULL DEFAULT 0, 0..3` | Брояч на опитите; максимум три опита |
+| `status` | `VARCHAR(20)` | `NOT NULL DEFAULT 'PENDING'` | `PENDING`, `DELIVERED` или `FAILED` |
+| `last_error` | `TEXT` | `NULL` | Последна грешка при доставяне |
+
+- **Индекси и ограничения:**
+  - `uk_integration_events_event_id` (UNIQUE B-tree) върху `event_id` — не позволява дублиране.
+  - `idx_integration_events_retry` (B-tree) върху `(status, next_retry_at)` — намиране на чакащи събития за изпращане.
+  - Успешно доставените събития са `DELIVERED` и не се изпращат повторно; повторните опити се ограничават до три чрез `retry_count`.
+- `user_alias` се създава извън базата чрез HMAC с отделен environment secret; тайната и реалният OIDC subject не се съхраняват в outbox payload-а.
+
+`ASSIGNMENT` остава тип `Material`, а условието и историята му се пазят в `Material`/`MaterialVersion`. Не се добавят модели за срокове, точки, предавания, оценки или тестове; тестовете са отговорност на Екип 3.
+
 ---
 
 ## 3. Оптимизация за пикови натоварвания и търсене (UC-31, UC-42)
@@ -337,4 +390,3 @@ CREATE INDEX idx_tags_name_trgm ON tags USING gin (name gin_trgm_ops);
 - При запис на отметка за прочетено (`PUT /materials/{id}/read`) се използва идемпотентна операция:
   `INSERT INTO read_marks ... ON CONFLICT (user_id, material_id) DO UPDATE SET read_at = EXCLUDED.read_at, version_at_read = EXCLUDED.version_at_read;`
   Това предпазва връзките към базата данни от изключения и транзакционни откази при дублирани кликове от потребителите.
-
