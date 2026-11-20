@@ -30,6 +30,16 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+      - name: Set up JDK & cache Maven
+        if: hashFiles('backend/unicloud/pom.xml') != ''
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'maven'
+      - name: Pre-populate Maven local cache
+        if: hashFiles('backend/unicloud/pom.xml') != ''
+        run: mvn -B -f backend/unicloud/pom.xml dependency:resolve  
       - name: Run Trivy vulnerability scanner in fs mode
         uses: aquasecurity/trivy-action@master
         with:
