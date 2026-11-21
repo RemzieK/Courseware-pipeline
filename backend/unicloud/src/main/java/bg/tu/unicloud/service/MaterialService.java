@@ -9,10 +9,17 @@ import bg.tu.unicloud.repository.MaterialVersionRepository;
 import bg.tu.unicloud.repository.TagRepository;
 import bg.tu.unicloud.security.AuthenticatedUser;
 import bg.tu.unicloud.security.CurrentUserService;
+import bg.tu.unicloud.storage.FileValidationService;
+import bg.tu.unicloud.storage.StorageService;
+import bg.tu.unicloud.storage.StoredFile;
+import lombok.Builder;
 import lombok.RequiredArgsConstructor;
+import lombok.Value;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.*;
 
@@ -27,6 +34,17 @@ public class MaterialService {
     private final LessonService lessonService;
     private final CourseService courseService;
     private final CurrentUserService currentUserService;
+    private final StorageService storageService;
+    private final FileValidationService fileValidationService;
+
+    @Value
+    @Builder
+    public static class DownloadFileResult {
+        boolean redirect;
+        String redirectUrl;
+        Resource resource;
+        MaterialVersion materialVersion;
+    }
 
     @Transactional(readOnly = true)
     public List<MaterialResponse> getMaterialsByLesson(UUID lessonId) {
@@ -54,8 +72,17 @@ public class MaterialService {
 
     @Transactional
     public MaterialResponse createMaterial(UUID lessonId, MaterialCreateRequest request) {
+        return createMaterial(lessonId, request, null);
+    }
+
+    @Transactional
+    public MaterialResponse createMaterial(UUID lessonId, MaterialCreateRequest request, MultipartFile file) {
         Lesson lesson = lessonService.getLessonEntity(lessonId);
         courseService.checkCourseOwnership(lesson.getModule().getCourse());
+
+        if (file != null && !file.isEmpty()) {
+            fileValidationService.validateFile(file);
+        }
 
         Set<Tag> tags = resolveTags(request.getTags());
 
@@ -71,9 +98,26 @@ public class MaterialService {
                 .build();
 
         Material saved = materialRepository.save(material);
+        User uploader = currentUserService.requireCurrentUserEntity();
 
-        if (request.getFileUrl() != null && !request.getFileUrl().isBlank()) {
-            User uploader = currentUserService.requireCurrentUserEntity();
+        if (file != null && !file.isEmpty()) {
+            String subDir = "materials/" + saved.getId() + "/v1";
+            StoredFile stored = storageService.store(file, subDir);
+
+            MaterialVersion version = MaterialVersion.builder()
+                    .material(saved)
+                    .versionNumber(1)
+                    .fileUrl("/api/v1/materials/" + saved.getId() + "/file?version=1")
+                    .fileName(stored.getFileName())
+                    .mimeType(stored.getMimeType())
+                    .fileSizeBytes(stored.getFileSizeBytes())
+                    .fileHash(stored.getFileHash())
+                    .storagePath(stored.getStoragePath())
+                    .uploadedBy(uploader)
+                    .build();
+            materialVersionRepository.save(version);
+            saved.getVersions().add(version);
+        } else if (request.getFileUrl() != null && !request.getFileUrl().isBlank()) {
             MaterialVersion version = MaterialVersion.builder()
                     .material(saved)
                     .versionNumber(1)
@@ -139,9 +183,44 @@ public class MaterialService {
                 .build();
 
         MaterialVersion saved = materialVersionRepository.save(version);
+        material.getVersions().add(0, saved);
         materialRepository.save(material);
 
         log.info("Material version added: materialId={}, version={}", materialId, newVersionNumber);
+        return mapToVersionResponse(saved);
+    }
+
+    @Transactional
+    public MaterialVersionResponse addVersion(UUID materialId, MultipartFile file) {
+        Material material = getMaterialEntity(materialId);
+        courseService.checkCourseOwnership(material.getLesson().getModule().getCourse());
+
+        fileValidationService.validateFile(file);
+
+        User uploader = currentUserService.requireCurrentUserEntity();
+        int newVersionNumber = material.getCurrentVersion() + 1;
+        material.setCurrentVersion(newVersionNumber);
+
+        String subDir = "materials/" + materialId + "/v" + newVersionNumber;
+        StoredFile stored = storageService.store(file, subDir);
+
+        MaterialVersion version = MaterialVersion.builder()
+                .material(material)
+                .versionNumber(newVersionNumber)
+                .fileUrl("/api/v1/materials/" + materialId + "/file?version=" + newVersionNumber)
+                .fileName(stored.getFileName())
+                .mimeType(stored.getMimeType())
+                .fileSizeBytes(stored.getFileSizeBytes())
+                .fileHash(stored.getFileHash())
+                .storagePath(stored.getStoragePath())
+                .uploadedBy(uploader)
+                .build();
+
+        MaterialVersion saved = materialVersionRepository.save(version);
+        material.getVersions().add(0, saved);
+        materialRepository.save(material);
+
+        log.info("Material version added via multipart: materialId={}, version={}", materialId, newVersionNumber);
         return mapToVersionResponse(saved);
     }
 
@@ -180,6 +259,50 @@ public class MaterialService {
                 .orElseThrow(() -> new ResourceNotFoundException("Версия " + targetVersion + " на материала не е намерена."));
 
         return mapToVersionResponse(materialVersion);
+    }
+
+    @Transactional(readOnly = true)
+    public DownloadFileResult downloadFile(UUID materialId, Integer version) {
+        Material material = getMaterialEntity(materialId);
+
+        Optional<AuthenticatedUser> authUserOpt = currentUserService.getAuthenticatedUser();
+        if (authUserOpt.isPresent()) {
+            AuthenticatedUser authUser = authUserOpt.get();
+            if (authUser.getRole() == Role.SERVICE) {
+                // Strict check: SERVICE role can only download ASSIGNMENT files!
+                if (material.getType() != MaterialType.ASSIGNMENT) {
+                    throw new AccessForbiddenException("Служебният акаунт има достъп само до файлове на материали от тип ASSIGNMENT.");
+                }
+            }
+        }
+
+        if (material.isHidden() && !canViewHidden(material.getLesson().getModule().getCourse())) {
+            throw new ResourceNotFoundException("Материалът с ID " + materialId + " не е намерен.");
+        }
+
+        int targetVersion = version != null ? version : material.getCurrentVersion();
+        MaterialVersion materialVersion = materialVersionRepository.findByMaterialIdAndVersionNumber(materialId, targetVersion)
+                .orElseThrow(() -> new ResourceNotFoundException("Версия " + targetVersion + " на материала не е намерена."));
+
+        if (materialVersion.getFileUrl() != null &&
+                (materialVersion.getFileUrl().startsWith("http://") || materialVersion.getFileUrl().startsWith("https://"))) {
+            return DownloadFileResult.builder()
+                    .redirect(true)
+                    .redirectUrl(materialVersion.getFileUrl())
+                    .materialVersion(materialVersion)
+                    .build();
+        }
+
+        String path = materialVersion.getStoragePath() != null
+                ? materialVersion.getStoragePath()
+                : materialVersion.getFileUrl();
+        Resource resource = storageService.loadAsResource(path);
+
+        return DownloadFileResult.builder()
+                .redirect(false)
+                .resource(resource)
+                .materialVersion(materialVersion)
+                .build();
     }
 
     @Transactional(readOnly = true)
@@ -224,7 +347,11 @@ public class MaterialService {
 
         String fileUrl = null;
         if (material.getVersions() != null && !material.getVersions().isEmpty()) {
-            fileUrl = material.getVersions().get(0).getFileUrl();
+            fileUrl = material.getVersions().stream()
+                    .filter(v -> v.getVersionNumber() == material.getCurrentVersion())
+                    .findFirst()
+                    .map(MaterialVersion::getFileUrl)
+                    .orElse(material.getVersions().get(0).getFileUrl());
         }
 
         return MaterialResponse.builder()
