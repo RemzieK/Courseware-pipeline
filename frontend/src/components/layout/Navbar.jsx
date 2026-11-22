@@ -1,10 +1,11 @@
+
 import { NavLink } from "react-router-dom";
 
 function Navbar() {
   return (
     <header className="navbar">
       <NavLink to="/" className="logo">
-        UniCloud
+        UniCloud Portal
       </NavLink>
 
       <nav className="nav-links">
