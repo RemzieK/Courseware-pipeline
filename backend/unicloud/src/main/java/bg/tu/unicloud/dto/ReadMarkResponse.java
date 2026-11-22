@@ -17,5 +17,6 @@ public class ReadMarkResponse {
     private UUID userId;
     private UUID materialId;
     private int versionAtRead;
+    private boolean hasNewVersion;
     private Instant readAt;
 }

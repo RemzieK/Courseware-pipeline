@@ -69,6 +69,10 @@ public class MaterialVersion {
     @Column(name = "file_hash", length = 64)
     private String fileHash;
 
+    @Size(max = 1000)
+    @Column(name = "storage_path", length = 1000)
+    private String storagePath;
+
     @NotNull
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "uploaded_by", nullable = false)

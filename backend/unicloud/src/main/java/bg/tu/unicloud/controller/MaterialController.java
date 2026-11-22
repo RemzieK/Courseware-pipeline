@@ -4,15 +4,19 @@ import bg.tu.unicloud.dto.MaterialResponse;
 import bg.tu.unicloud.dto.MaterialUpdateRequest;
 import bg.tu.unicloud.dto.MaterialVersionCreateRequest;
 import bg.tu.unicloud.dto.MaterialVersionResponse;
+import bg.tu.unicloud.model.MaterialVersion;
 import bg.tu.unicloud.service.MaterialService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.CacheControl;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.net.URI;
 import java.util.List;
@@ -45,12 +49,21 @@ public class MaterialController {
         return ResponseEntity.ok(response);
     }
 
-    @PostMapping("/{materialId}/versions")
-    @Operation(summary = "Качване на нова версия на файл към материал (собственик / админ)")
-    public ResponseEntity<MaterialVersionResponse> addVersion(
+    @PostMapping(value = "/{materialId}/versions", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(summary = "Качване на нова версия на файл към материал чрез JSON метаданни (собственик / админ)")
+    public ResponseEntity<MaterialVersionResponse> addVersionJson(
             @PathVariable UUID materialId,
             @Valid @RequestBody MaterialVersionCreateRequest request) {
         MaterialVersionResponse response = materialService.addVersion(materialId, request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    @PostMapping(value = "/{materialId}/versions", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(summary = "Качване на нова версия на файл към материал чрез multipart/form-data (собственик / админ)")
+    public ResponseEntity<MaterialVersionResponse> addVersionMultipart(
+            @PathVariable UUID materialId,
+            @RequestPart("file") MultipartFile file) {
+        MaterialVersionResponse response = materialService.addVersion(materialId, file);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
@@ -65,20 +78,23 @@ public class MaterialController {
 
     @GetMapping("/{materialId}/file")
     @Operation(summary = "Изтегляне на файл от конкретна или текуща версия")
-    public ResponseEntity<MaterialVersionResponse> getFile(
+    public ResponseEntity<?> getFile(
             @PathVariable UUID materialId,
             @RequestParam(required = false) Integer version) {
-        MaterialVersionResponse versionResponse = materialService.getFileMetadata(materialId, version);
+        MaterialService.DownloadFileResult result = materialService.downloadFile(materialId, version);
 
-        if (versionResponse.getFileUrl() != null && versionResponse.getFileUrl().startsWith("http")) {
+        if (result.isRedirect()) {
             return ResponseEntity.status(HttpStatus.FOUND)
-                    .location(URI.create(versionResponse.getFileUrl()))
-                    .cacheControl(CacheControl.maxAge(60, TimeUnit.SECONDS).cachePublic())
-                    .body(versionResponse);
+                    .location(URI.create(result.getRedirectUrl()))
+                    .cacheControl(CacheControl.maxAge(86400, TimeUnit.SECONDS).cachePublic())
+                    .build();
         }
 
+        MaterialVersion mv = result.getMaterialVersion();
         return ResponseEntity.ok()
-                .cacheControl(CacheControl.maxAge(60, TimeUnit.SECONDS).cachePublic())
-                .body(versionResponse);
+                .contentType(MediaType.parseMediaType(mv.getMimeType()))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + mv.getFileName() + "\"")
+                .cacheControl(CacheControl.maxAge(86400, TimeUnit.SECONDS).cachePublic())
+                .body(result.getResource());
     }
 }

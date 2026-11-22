@@ -10,7 +10,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
@@ -399,5 +401,221 @@ class CoursewareApiIntegrationTest {
                 .andExpect(jsonPath("$.token").isNotEmpty())
                 .andExpect(jsonPath("$.role").value("STUDENT"))
                 .andExpect(jsonPath("$.email").value("student1@tu-sofia.bg"));
+    }
+
+    @Test
+    @DisplayName("UC-29 & US-04: Multipart file upload, versioning, download, and student read update tracking")
+    void testFileUploadVersioningAndSecurityLifecycle() throws Exception {
+        String teacherToken = getTestToken("teacher1", "TEACHER", "teacher1@tu-sofia.bg", "usr-teacher-1");
+        String studentToken = getTestToken("student1", "STUDENT", "student1@tu-sofia.bg", "usr-student-1");
+
+        // 1. Create Course, Module, Lesson
+        String code = "UC29-" + UUID.randomUUID().toString().substring(0, 8);
+        CourseCreateRequest courseReq = CourseCreateRequest.builder()
+                .code(code)
+                .title("Cloud File Upload Testing")
+                .discipline("CS")
+                .semester("2026W")
+                .build();
+
+        String courseJson = mockMvc.perform(post("/api/v1/courses")
+                        .header("Authorization", "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(courseReq)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        UUID courseId = objectMapper.readValue(courseJson, CourseResponse.class).getId();
+
+        ModuleCreateRequest modReq = ModuleCreateRequest.builder().title("Module Upload").orderIndex(1).build();
+        String modJson = mockMvc.perform(post("/api/v1/courses/" + courseId + "/modules")
+                        .header("Authorization", "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(modReq)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        UUID moduleId = objectMapper.readValue(modJson, ModuleResponse.class).getId();
+
+        LessonCreateRequest lessonReq = LessonCreateRequest.builder().title("Lesson 1 Files").orderIndex(1).build();
+        String lessonJson = mockMvc.perform(post("/api/v1/modules/" + moduleId + "/lessons")
+                        .header("Authorization", "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(lessonReq)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        UUID lessonId = objectMapper.readValue(lessonJson, LessonResponse.class).getId();
+
+        // 2. Upload initial material via multipart/form-data
+        byte[] v1Bytes = "%PDF-1.7 Lecture 1 test content bytes".getBytes();
+        MockMultipartFile v1File = new MockMultipartFile("file", "lecture1.pdf", "application/pdf", v1Bytes);
+
+        String matJson = mockMvc.perform(multipart("/api/v1/lessons/" + lessonId + "/materials")
+                        .file(v1File)
+                        .param("title", "Лекция 1 – Въведение в облака")
+                        .param("type", "PRESENTATION")
+                        .param("description", "Слайдове за първа лекция")
+                        .header("Authorization", "Bearer " + teacherToken))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.currentVersion").value(1))
+                .andExpect(jsonPath("$.fileUrl").value(containsString("/api/v1/materials/")))
+                .andReturn().getResponse().getContentAsString();
+
+        UUID materialId = objectMapper.readValue(matJson, MaterialResponse.class).getId();
+
+        // 3. Student marks material v1 as read
+        mockMvc.perform(put("/api/v1/materials/" + materialId + "/read")
+                        .header("Authorization", "Bearer " + studentToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.versionAtRead").value(1))
+                .andExpect(jsonPath("$.hasNewVersion").value(false));
+
+        // Course progress shows 100%
+        mockMvc.perform(get("/api/v1/courses/" + courseId + "/progress")
+                        .header("Authorization", "Bearer " + studentToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.readMaterials").value(1))
+                .andExpect(jsonPath("$.progressPercentage").value(100.0));
+
+        // 4. Teacher uploads version 2 via multipart/form-data
+        byte[] v2Bytes = "%PDF-1.7 Lecture 1 updated version 2 content bytes".getBytes();
+        MockMultipartFile v2File = new MockMultipartFile("file", "lecture1_v2.pdf", "application/pdf", v2Bytes);
+
+        mockMvc.perform(multipart("/api/v1/materials/" + materialId + "/versions")
+                        .file(v2File)
+                        .header("Authorization", "Bearer " + teacherToken))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.versionNumber").value(2))
+                .andExpect(jsonPath("$.fileName").value("lecture1_v2.pdf"));
+
+        // 5. Version history shows both versions
+        mockMvc.perform(get("/api/v1/materials/" + materialId + "/versions"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(2)))
+                .andExpect(jsonPath("$[0].versionNumber").value(2))
+                .andExpect(jsonPath("$[1].versionNumber").value(1));
+
+        // 6. US-04 check: student progress now reflects update available (hasNewVersion: true)
+        mockMvc.perform(get("/api/v1/courses/" + courseId + "/progress")
+                        .header("Authorization", "Bearer " + studentToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.readMarks[0].hasNewVersion").value(true))
+                .andExpect(jsonPath("$.readMaterials").value(0))
+                .andExpect(jsonPath("$.progressPercentage").value(0.0));
+
+        // 7. Download file checks (v1, v2, and current default)
+        mockMvc.perform(get("/api/v1/materials/" + materialId + "/file").param("version", "1"))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CONTENT_TYPE, "application/pdf"))
+                .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION, containsString("lecture1.pdf")))
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, containsString("max-age=86400")))
+                .andExpect(content().bytes(v1Bytes));
+
+        mockMvc.perform(get("/api/v1/materials/" + materialId + "/file").param("version", "2"))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CONTENT_TYPE, "application/pdf"))
+                .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION, containsString("lecture1_v2.pdf")))
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, containsString("max-age=86400")))
+                .andExpect(content().bytes(v2Bytes));
+
+        mockMvc.perform(get("/api/v1/materials/" + materialId + "/file"))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CONTENT_TYPE, "application/pdf"))
+                .andExpect(content().bytes(v2Bytes));
+    }
+
+    @Test
+    @DisplayName("UC-13: Safe upload controls reject executables (415) and oversized files (413)")
+    void testFileSecurityPolicyRejections() throws Exception {
+        String teacherToken = getTestToken("teacher1", "TEACHER", "teacher1@tu-sofia.bg", "usr-teacher-1");
+
+        // Create prerequisite course, module, lesson
+        String code = "SEC-" + UUID.randomUUID().toString().substring(0, 8);
+        CourseCreateRequest courseReq = CourseCreateRequest.builder()
+                .code(code)
+                .title("Security Upload Policy Course")
+                .discipline("CS")
+                .semester("2026W")
+                .build();
+
+        String courseJson = mockMvc.perform(post("/api/v1/courses")
+                        .header("Authorization", "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(courseReq)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        UUID courseId = objectMapper.readValue(courseJson, CourseResponse.class).getId();
+
+        ModuleCreateRequest modReq = ModuleCreateRequest.builder().title("Security Module").orderIndex(1).build();
+        String modJson = mockMvc.perform(post("/api/v1/courses/" + courseId + "/modules")
+                        .header("Authorization", "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(modReq)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        UUID moduleId = objectMapper.readValue(modJson, ModuleResponse.class).getId();
+
+        LessonCreateRequest lessonReq = LessonCreateRequest.builder().title("Security Lesson").orderIndex(1).build();
+        String lessonJson = mockMvc.perform(post("/api/v1/modules/" + moduleId + "/lessons")
+                        .header("Authorization", "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(lessonReq)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        UUID lessonId = objectMapper.readValue(lessonJson, LessonResponse.class).getId();
+
+        // 1. Explicit executable file (.exe) -> 415 Unsupported Media Type
+        MockMultipartFile exeFile = new MockMultipartFile("file", "trojan.exe", "application/octet-stream",
+                new byte[]{0x4D, 0x5A, 0x00, 0x00});
+
+        mockMvc.perform(multipart("/api/v1/lessons/" + lessonId + "/materials")
+                        .file(exeFile)
+                        .param("title", "Trojan Attempt")
+                        .param("type", "PRESENTATION")
+                        .header("Authorization", "Bearer " + teacherToken))
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.status").value(415))
+                .andExpect(jsonPath("$.error").value("UNSUPPORTED_MEDIA_TYPE"));
+
+        // 2. Disguised executable (.exe renamed to .pdf with MZ header) -> 415 Unsupported Media Type
+        MockMultipartFile disguisedExe = new MockMultipartFile("file", "renamed_virus.pdf", "application/pdf",
+                new byte[]{0x4D, 0x5A, 0x11, 0x22});
+
+        mockMvc.perform(multipart("/api/v1/lessons/" + lessonId + "/materials")
+                        .file(disguisedExe)
+                        .param("title", "Disguised Virus Attempt")
+                        .param("type", "PRESENTATION")
+                        .header("Authorization", "Bearer " + teacherToken))
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.status").value(415))
+                .andExpect(jsonPath("$.error").value("UNSUPPORTED_MEDIA_TYPE"));
+
+        // 3. Disguised PHP script renamed to .docx -> 415 Unsupported Media Type
+        MockMultipartFile disguisedPhp = new MockMultipartFile("file", "payload.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "<?php phpinfo(); ?>".getBytes());
+
+        mockMvc.perform(multipart("/api/v1/lessons/" + lessonId + "/materials")
+                        .file(disguisedPhp)
+                        .param("title", "Disguised PHP Attempt")
+                        .param("type", "NOTES")
+                        .header("Authorization", "Bearer " + teacherToken))
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.status").value(415))
+                .andExpect(jsonPath("$.error").value("UNSUPPORTED_MEDIA_TYPE"));
+
+        // 4. File over 50 MB -> 413 Payload Too Large
+        MockMultipartFile oversizedFile = new MockMultipartFile("file", "huge_presentation.pdf", "application/pdf", new byte[16]) {
+            @Override
+            public long getSize() {
+                return 51 * 1024 * 1024L; // 51 MB
+            }
+        };
+
+        mockMvc.perform(multipart("/api/v1/lessons/" + lessonId + "/materials")
+                        .file(oversizedFile)
+                        .param("title", "Huge File Attempt")
+                        .param("type", "PRESENTATION")
+                        .header("Authorization", "Bearer " + teacherToken))
+                .andExpect(status().isPayloadTooLarge())
+                .andExpect(jsonPath("$.status").value(413))
+                .andExpect(jsonPath("$.error").value("PAYLOAD_TOO_LARGE"));
     }
 }

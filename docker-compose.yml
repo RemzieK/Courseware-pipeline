@@ -5,6 +5,9 @@ x-backend: &backend
     SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${DB_NAME}
     SPRING_DATASOURCE_USERNAME: ${DB_USER}
     SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
+    STORAGE_ROOT_DIR: /var/unicloud/storage
+  volumes:
+    - unicloud_storage:/var/unicloud/storage
   depends_on:
     db:
       condition: service_healthy
@@ -62,3 +65,4 @@ services:
 
 volumes:
   pgdata:
+  unicloud_storage:

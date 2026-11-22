@@ -4,6 +4,8 @@ import bg.tu.unicloud.dto.LessonResponse;
 import bg.tu.unicloud.dto.LessonUpdateRequest;
 import bg.tu.unicloud.dto.MaterialCreateRequest;
 import bg.tu.unicloud.dto.MaterialResponse;
+import bg.tu.unicloud.exception.BadRequestException;
+import bg.tu.unicloud.model.MaterialType;
 import bg.tu.unicloud.service.LessonService;
 import bg.tu.unicloud.service.MaterialService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -12,8 +14,10 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.UUID;
@@ -53,12 +57,47 @@ public class LessonController {
                 .body(response);
     }
 
-    @PostMapping("/{lessonId}/materials")
-    @Operation(summary = "Добавяне на учебен материал към занятие (собственик / админ)")
-    public ResponseEntity<MaterialResponse> createMaterial(
+    @PostMapping(value = "/{lessonId}/materials", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(summary = "Добавяне на учебен материал чрез JSON (собственик / админ)")
+    public ResponseEntity<MaterialResponse> createMaterialJson(
             @PathVariable UUID lessonId,
             @Valid @RequestBody MaterialCreateRequest request) {
         MaterialResponse response = materialService.createMaterial(lessonId, request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    @PostMapping(value = "/{lessonId}/materials", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(summary = "Добавяне на учебен материал с качване на файл (собственик / админ)")
+    public ResponseEntity<MaterialResponse> createMaterialMultipart(
+            @PathVariable UUID lessonId,
+            @RequestPart(value = "file", required = false) MultipartFile file,
+            @RequestPart(value = "request", required = false) @Valid MaterialCreateRequest requestPart,
+            @RequestParam(value = "type", required = false) MaterialType type,
+            @RequestParam(value = "title", required = false) String title,
+            @RequestParam(value = "description", required = false) String description,
+            @RequestParam(value = "videoUrl", required = false) String videoUrl,
+            @RequestParam(value = "tags", required = false) List<String> tags,
+            @RequestParam(value = "hidden", required = false) Boolean hidden) {
+
+        MaterialCreateRequest request = requestPart;
+        if (request == null) {
+            if (title == null || title.isBlank()) {
+                throw new BadRequestException("Заглавието на материала е задължително.");
+            }
+            if (type == null) {
+                throw new BadRequestException("Типът на материала е задължителен.");
+            }
+            request = MaterialCreateRequest.builder()
+                    .type(type)
+                    .title(title)
+                    .description(description)
+                    .videoUrl(videoUrl)
+                    .tags(tags)
+                    .hidden(hidden)
+                    .build();
+        }
+
+        MaterialResponse response = materialService.createMaterial(lessonId, request, file);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 }

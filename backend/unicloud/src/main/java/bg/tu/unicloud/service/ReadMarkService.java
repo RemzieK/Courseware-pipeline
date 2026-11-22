@@ -84,8 +84,12 @@ public class ReadMarkService {
         List<ReadMark> readMarks = readMarkRepository.findByUserIdAndCourseId(currentUser.getId(), courseId);
         long totalMaterials = materialRepository.countNonHiddenMaterialsByCourseId(courseId);
 
+        long upToDateReadCount = readMarks.stream()
+                .filter(rm -> rm.getMaterial() == null || rm.getVersionAtRead() >= rm.getMaterial().getCurrentVersion())
+                .count();
+
         double progressPct = totalMaterials > 0
-                ? ((double) readMarks.size() / (double) totalMaterials) * 100.0
+                ? ((double) upToDateReadCount / (double) totalMaterials) * 100.0
                 : 0.0;
 
         List<ReadMarkResponse> dtos = readMarks.stream().map(this::mapToResponse).toList();
@@ -94,18 +98,24 @@ public class ReadMarkService {
                 .courseId(course.getId())
                 .courseCode(course.getCode())
                 .totalMaterials((int) totalMaterials)
-                .readMaterials(readMarks.size())
+                .readMaterials((int) upToDateReadCount)
                 .progressPercentage(Math.round(progressPct * 10.0) / 10.0)
                 .readMarks(dtos)
                 .build();
     }
 
     public ReadMarkResponse mapToResponse(ReadMark readMark) {
+        boolean hasNewVersion = false;
+        if (readMark.getMaterial() != null) {
+            hasNewVersion = readMark.getVersionAtRead() < readMark.getMaterial().getCurrentVersion();
+        }
+
         return ReadMarkResponse.builder()
                 .id(readMark.getId())
                 .userId(readMark.getUser() != null ? readMark.getUser().getId() : null)
                 .materialId(readMark.getMaterial() != null ? readMark.getMaterial().getId() : null)
                 .versionAtRead(readMark.getVersionAtRead())
+                .hasNewVersion(hasNewVersion)
                 .readAt(readMark.getReadAt())
                 .build();
     }
