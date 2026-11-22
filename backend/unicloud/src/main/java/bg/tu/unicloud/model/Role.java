@@ -10,3 +10,4 @@ public enum Role {
     SERVICE
 }
 
+// TODO: add dean role

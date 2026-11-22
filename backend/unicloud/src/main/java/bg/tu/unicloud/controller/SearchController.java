@@ -4,6 +4,9 @@ import bg.tu.unicloud.dto.PagedResponse;
 import bg.tu.unicloud.dto.SearchResultDto;
 import bg.tu.unicloud.service.SearchService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.CacheControl;
@@ -24,7 +27,16 @@ public class SearchController {
     private final SearchService searchService;
 
     @GetMapping
-    @Operation(summary = "Търсене по ключова дума, дисциплина, преподавател или тема")
+    @Operation(
+            summary = "Търсене по ключова дума, дисциплина, преподавател или тема",
+            description = """
+                    Публичен ендпойнт. Използва PostgreSQL pg_trgm за размито търсене с толеранс
+                    до 1 грешна буква в кирилица (праг за сходство 0.2).
+                    Резултатите включват курсове и материали, съвпадащи с подадените критерии.
+                    SLO: p95 < 500 ms при тестовите данни (UC-07).
+                    """)
+    @ApiResponse(responseCode = "200", description = "Успешно извлечени резултати от търсенето",
+            content = @Content(schema = @Schema(implementation = PagedResponse.class)))
     public ResponseEntity<PagedResponse<SearchResultDto>> search(
             @RequestParam(required = false) String q,
             @RequestParam(required = false) String discipline,
