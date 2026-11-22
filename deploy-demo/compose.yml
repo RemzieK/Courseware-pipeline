@@ -1,0 +1,21 @@
+services:
+  web:
+    image: ghcr.io/${OWNER}/unicloud-demo:${IMAGE_TAG}
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: unicloud
+      POSTGRES_USER: unicloud
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-unicloud_demo}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U unicloud -d unicloud"]
+      interval: 3s
+      retries: 20
+    restart: unless-stopped
+volumes:
+  pgdata:
