@@ -30,11 +30,12 @@ public interface CourseRepository extends JpaRepository<Course, UUID>, JpaSpecif
     @Query("SELECT c FROM Course c LEFT JOIN FETCH c.modules m LEFT JOIN FETCH m.lessons l WHERE c.id = :id")
     Optional<Course> findByIdWithStructure(@Param("id") UUID id);
 
+    
     @Query("""
             SELECT c FROM Course c
             WHERE (:archived IS NULL OR c.archived = :archived)
-              AND (:discipline IS NULL OR LOWER(c.discipline) = LOWER(:discipline))
-              AND (:semester IS NULL OR LOWER(c.semester) = LOWER(:semester))
+              AND (:discipline IS NULL OR LOWER(c.discipline) = :discipline)
+              AND (:semester IS NULL OR LOWER(c.semester) = :semester)
               AND (:teacherId IS NULL OR c.teacher.id = :teacherId)
             """)
     Page<Course> findWithFilters(

@@ -4,6 +4,7 @@ import MainLayout from "../components/layout/MainLayout";
 import CatalogPage from "../pages/CatalogPage";
 import CourseDetailsPage from "../pages/CourseDetailsPage";
 import MaterialPage from "../pages/MaterialPage";
+import SearchPage from "../pages/SearchPage";
 
 function HomePage() {
   return (
@@ -68,7 +69,7 @@ function AppRoutes() {
         <Route path="/materials" element={<PlaceholderPage title="Учебни материали" />} />
         <Route path="/materials/:materialId" element={<MaterialPage />} />
 
-        <Route path="/search" element={<PlaceholderPage title="Търсене на материали" />} />
+        <Route path="/search" element={<SearchPage />} />
         <Route path="/teacher" element={<PlaceholderPage title="Преподавателски панел" />} />
 
         <Route path="*" element={<NotFoundPage />} />

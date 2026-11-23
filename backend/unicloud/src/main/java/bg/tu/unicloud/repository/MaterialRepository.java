@@ -1,5 +1,5 @@
 package bg.tu.unicloud.repository;
-
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import bg.tu.unicloud.model.Material;
 import bg.tu.unicloud.model.MaterialType;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -12,7 +12,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 @Repository
-public interface MaterialRepository extends JpaRepository<Material, UUID> {
+public interface MaterialRepository extends JpaRepository<Material, UUID>, JpaSpecificationExecutor<Material> {
 
         List<Material> findByLessonIdAndHiddenFalse(UUID lessonId);
 
