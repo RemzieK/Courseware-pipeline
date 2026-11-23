@@ -13,7 +13,7 @@ import java.util.UUID;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Schema(description = "Отметка „прочетено" за учебен материал от конкретен студент")
+@Schema(description = "Отметка „прочетено\" за учебен материал от конкретен студент")
 public class ReadMarkResponse {
 
     @Schema(description = "Уникален идентификатор на отметката", example = "e0eebc99-9c0b-4ef8-bb6d-6bb9bd380a55")
