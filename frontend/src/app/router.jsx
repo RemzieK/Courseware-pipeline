@@ -5,6 +5,7 @@ import CatalogPage from "../pages/CatalogPage";
 import CourseDetailsPage from "../pages/CourseDetailsPage";
 import MaterialPage from "../pages/MaterialPage";
 import SearchPage from "../pages/SearchPage";
+import LoginPage from "../pages/LoginPage";
 
 function HomePage() {
   return (
@@ -71,6 +72,8 @@ function AppRoutes() {
 
         <Route path="/search" element={<SearchPage />} />
         <Route path="/teacher" element={<PlaceholderPage title="Преподавателски панел" />} />
+
+        <Route path="/login" element={<LoginPage />} />
 
         <Route path="*" element={<NotFoundPage />} />
       </Route>
