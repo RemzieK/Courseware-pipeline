@@ -2,13 +2,20 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import api from "../services/api";
+import MaterialCreateForm from "../components/materials/MaterialCreateForm";
+import { useAuth } from "../context/AuthContext";
 
 function CourseDetailsPage() {
   const { courseId } = useParams();
+  const { user } = useAuth();
+
+  const canManageMaterials =
+    user?.role === "TEACHER" || user?.role === "ADMIN";
 
   const [course, setCourse] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [activeLessonId, setActiveLessonId] = useState(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -82,6 +89,25 @@ function CourseDetailsPage() {
     return () => controller.abort();
   }, [courseId]);
 
+  function handleMaterialCreated(lessonId, material) {
+    setCourse((currentCourse) => ({
+      ...currentCourse,
+      modules: currentCourse.modules.map((module) => ({
+        ...module,
+        lessons: module.lessons.map((lesson) =>
+          lesson.id === lessonId
+            ? {
+                ...lesson,
+                materials: [...(lesson.materials ?? []), material],
+              }
+            : lesson
+        ),
+      })),
+    }));
+
+    setActiveLessonId(null);
+  }
+
   if (loading) {
     return (
       <section className="page">
@@ -134,7 +160,7 @@ function CourseDetailsPage() {
           {course.modules.map((module) => (
             <article className="module-item" key={module.id}>
               <span className="badge">
-                Модул {module.orderIndex + 1}
+                Модул {(module.orderIndex ?? 0) + 1}
               </span>
 
               <h3>{module.title}</h3>
@@ -143,13 +169,15 @@ function CourseDetailsPage() {
 
               {module.lessons?.length ? (
                 module.lessons.map((lesson) => (
-                  <div key={lesson.id}>
+                  <div className="lesson-item" key={lesson.id}>
                     <h4>{lesson.title}</h4>
 
                     {lesson.description && <p>{lesson.description}</p>}
 
                     {lesson.materialsLoadError ? (
-                      <p>Материалите за това занятие не могат да бъдат заредени.</p>
+                      <p role="alert">
+                        Материалите за това занятие не могат да бъдат заредени.
+                      </p>
                     ) : lesson.materials?.length ? (
                       <ul className="material-list">
                         {lesson.materials.map((material) => (
@@ -164,7 +192,39 @@ function CourseDetailsPage() {
                         ))}
                       </ul>
                     ) : (
-                      <p className="muted">Няма добавени материали.</p>
+                      <p className="muted">
+                        Няма добавени материали.
+                      </p>
+                    )}
+
+                    {canManageMaterials && (
+                      <>
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={() =>
+                            setActiveLessonId(
+                              activeLessonId === lesson.id
+                                ? null
+                                : lesson.id
+                            )
+                          }
+                        >
+                          {activeLessonId === lesson.id
+                            ? "Затвори формата"
+                            : "Добави материал"}
+                        </button>
+
+                        {activeLessonId === lesson.id && (
+                          <MaterialCreateForm
+                            lessonId={lesson.id}
+                            onCreated={(material) =>
+                              handleMaterialCreated(lesson.id, material)
+                            }
+                            onCancel={() => setActiveLessonId(null)}
+                          />
+                        )}
+                      </>
                     )}
                   </div>
                 ))
