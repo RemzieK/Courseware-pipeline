@@ -10,7 +10,6 @@ import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.Join;
 import jakarta.persistence.criteria.JoinType;
 import jakarta.persistence.criteria.Predicate;
-import jakarta.persistence.criteria.Root;
 import org.springframework.data.jpa.domain.Specification;
 
 import java.util.ArrayList;
@@ -19,21 +18,28 @@ import java.util.List;
 /**
  * JPA Specifications for the UC-31 full-text search feature.
  *
- * <p>All fuzzy matching is delegated to the PostgreSQL {@code similarity()} function
+ * <p>
+ * All fuzzy matching is delegated to the PostgreSQL {@code similarity()}
+ * function
  * provided by the {@code pg_trgm} extension (enabled in V1__init_schema.sql).
- * The similarity threshold is set to 0.2 in V01__search_trgm.sql, which is enough
- * to tolerate one mis-typed Cyrillic character in typical academic terms.</p>
+ * The similarity threshold is set to 0.2 in V01__search_trgm.sql, which is
+ * enough
+ * to tolerate one mis-typed Cyrillic character in typical academic terms.
+ * </p>
  *
- * <p>No raw SQL strings appear here – matching predicates are built via
+ * <p>
+ * No raw SQL strings appear here – matching predicates are built via
  * {@link CriteriaBuilder#function(String, Class, jakarta.persistence.criteria.Expression[])}
- * which lets Hibernate translate them into the correct PostgreSQL call.</p>
+ * which lets Hibernate translate them into the correct PostgreSQL call.
+ * </p>
  */
 public final class SearchSpecification {
 
     /** Similarity threshold applied in every fuzzy predicate. */
     private static final double SIMILARITY_THRESHOLD = 0.2;
 
-    private SearchSpecification() {}
+    private SearchSpecification() {
+    }
 
     // -------------------------------------------------------------------------
     // Course specifications
@@ -43,7 +49,8 @@ public final class SearchSpecification {
      * Builds a {@link Specification} for {@link Course} that filters by keyword,
      * discipline and teacher name using pg_trgm similarity.
      *
-     * @param q          optional free-text keyword (matches title, description, code)
+     * @param q          optional free-text keyword (matches title, description,
+     *                   code)
      * @param discipline optional discipline name (fuzzy match)
      * @param teacher    optional teacher full name (fuzzy match)
      */
@@ -59,8 +66,7 @@ public final class SearchSpecification {
                         similarityPredicate(cb, root.get("title"), q),
                         similarityPredicate(cb, root.get("description"), q),
                         // Course code uses LIKE (exact prefix / substring); codes are short
-                        cb.like(cb.lower(root.get("code")), "%" + q.toLowerCase() + "%")
-                ));
+                        cb.like(cb.lower(root.get("code")), "%" + q.toLowerCase() + "%")));
             }
 
             if (discipline != null) {
@@ -84,13 +90,19 @@ public final class SearchSpecification {
      * Builds a {@link Specification} for {@link Material} that filters by keyword,
      * discipline, teacher name, and topic (tag name) using pg_trgm similarity.
      *
-     * <p>The join path is: {@code Material → Lesson → Module → Course → User(teacher)}.
-     * When {@code topic} is provided, {@code Material → Tags} is also joined.</p>
+     * <p>
+     * The join path is:
+     * {@code Material → Lesson → Module → Course → User(teacher)}.
+     * When {@code topic} is provided, {@code Material → Tags} is also joined.
+     * </p>
      *
      * @param q          optional free-text keyword (matches title, description)
-     * @param discipline optional discipline name (fuzzy match against parent course)
-     * @param teacher    optional teacher full name (fuzzy match against course teacher)
-     * @param topic      optional topic / tag name (fuzzy match against material tags)
+     * @param discipline optional discipline name (fuzzy match against parent
+     *                   course)
+     * @param teacher    optional teacher full name (fuzzy match against course
+     *                   teacher)
+     * @param topic      optional topic / tag name (fuzzy match against material
+     *                   tags)
      */
     public static Specification<Material> materialMatches(
             String q, String discipline, String teacher, String topic) {
@@ -107,16 +119,15 @@ public final class SearchSpecification {
             predicates.add(cb.isFalse(root.get("hidden")));
 
             // Traverse the hierarchy to reach the parent Course and its teacher
-            Join<Material, Lesson> lessonJoin   = root.join("lesson", JoinType.INNER);
-            Join<Lesson, Module>   moduleJoin   = lessonJoin.join("module", JoinType.INNER);
-            Join<Module, Course>   courseJoin   = moduleJoin.join("course", JoinType.INNER);
-            Join<Course, User>     teacherJoin  = courseJoin.join("teacher", JoinType.INNER);
+            Join<Material, Lesson> lessonJoin = root.join("lesson", JoinType.INNER);
+            Join<Lesson, Module> moduleJoin = lessonJoin.join("module", JoinType.INNER);
+            Join<Module, Course> courseJoin = moduleJoin.join("course", JoinType.INNER);
+            Join<Course, User> teacherJoin = courseJoin.join("teacher", JoinType.INNER);
 
             if (q != null) {
                 predicates.add(cb.or(
                         similarityPredicate(cb, root.get("title"), q),
-                        similarityPredicate(cb, root.get("description"), q)
-                ));
+                        similarityPredicate(cb, root.get("description"), q)));
             }
 
             if (discipline != null) {
@@ -141,8 +152,10 @@ public final class SearchSpecification {
     // -------------------------------------------------------------------------
 
     /**
-     * Creates a predicate that evaluates {@code similarity(field, term) >= SIMILARITY_THRESHOLD}
-     * via the PostgreSQL pg_trgm function.  Hibernate passes the call through to the database
+     * Creates a predicate that evaluates
+     * {@code similarity(field, term) >= SIMILARITY_THRESHOLD}
+     * via the PostgreSQL pg_trgm function. Hibernate passes the call through to the
+     * database
      * verbatim, so no raw SQL string is embedded here.
      */
     private static Predicate similarityPredicate(
@@ -152,7 +165,6 @@ public final class SearchSpecification {
 
         return cb.greaterThanOrEqualTo(
                 cb.function("similarity", Double.class, field, cb.literal(term)),
-                SIMILARITY_THRESHOLD
-        );
+                SIMILARITY_THRESHOLD);
     }
 }
