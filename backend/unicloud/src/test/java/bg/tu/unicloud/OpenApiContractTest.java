@@ -2,7 +2,7 @@ package bg.tu.unicloud;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
@@ -14,18 +14,24 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * UC-32 – OpenAPI contract test.
  *
- * <p>Verifies that:
+ * <p>
+ * Verifies that:
  * <ol>
- *   <li>{@code GET /v3/api-docs} is publicly accessible (no token required) and returns
- *       a valid OpenAPI 3 JSON document.</li>
- *   <li>All major API path prefixes are present in the generated specification so that
- *       SE 2 can generate a client without manual additions.</li>
- *   <li>{@code GET /swagger-ui.html} redirects successfully (Swagger UI is enabled).</li>
+ * <li>{@code GET /v3/api-docs} is publicly accessible (no token required) and
+ * returns
+ * a valid OpenAPI 3 JSON document.</li>
+ * <li>All major API path prefixes are present in the generated specification so
+ * that
+ * SE 2 can generate a client without manual additions.</li>
+ * <li>{@code GET /swagger-ui.html} redirects successfully (Swagger UI is
+ * enabled).</li>
  * </ol>
  * </p>
  *
- * <p>The test uses an H2 in-memory database via the {@code test} Spring profile,
- * bypassing the need for a live PostgreSQL instance in CI.</p>
+ * <p>
+ * The test uses an H2 in-memory database via the {@code test} Spring profile,
+ * bypassing the need for a live PostgreSQL instance in CI.
+ * </p>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureMockMvc
