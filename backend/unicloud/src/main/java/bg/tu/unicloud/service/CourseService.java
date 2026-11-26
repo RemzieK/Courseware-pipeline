@@ -56,8 +56,10 @@ public class CourseService {
 
         Boolean archivedFilter = archived != null ? archived : false;
         Page<Course> coursePage = courseRepository.findWithFilters(
-                discipline != null && !discipline.isBlank() ? discipline.trim() : null,
-                semester != null && !semester.isBlank() ? semester.trim() : null,
+                discipline != null && !discipline.isBlank()
+                        ? discipline.trim().toLowerCase(Locale.ROOT) : null,
+                semester != null && !semester.isBlank()
+                        ? semester.trim().toLowerCase(Locale.ROOT) : null,
                 teacherId,
                 archivedFilter,
                 pageable

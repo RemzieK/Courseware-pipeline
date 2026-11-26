@@ -1,5 +1,5 @@
 package bg.tu.unicloud.repository;
-
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import bg.tu.unicloud.model.Material;
 import bg.tu.unicloud.model.MaterialType;
 import org.springframework.data.jpa.repository.JpaRepository;

@@ -1,12 +1,36 @@
 import axios from "axios";
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "/api",
+  baseURL: import.meta.env.VITE_API_URL || "/api/v1",
   timeout: 10000,
-  headers: {
-    "Content-Type": "application/json",
-  },
 });
+
+api.interceptors.request.use(
+  (config) => {
+    try {
+      const stored = localStorage.getItem("unicloud_auth");
+
+      if (stored) {
+        const session = JSON.parse(stored);
+
+        if (
+          session.token &&
+          new Date(session.expiresAt).getTime() > Date.now()
+        ) {
+          config.headers.Authorization = `Bearer ${session.token}`;
+        } else {
+          localStorage.removeItem("unicloud_auth");
+          window.dispatchEvent(new Event("auth:unauthorized"));
+        }
+      }
+    } catch {
+      localStorage.removeItem("unicloud_auth");
+    }
+
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
 
 api.interceptors.response.use(
   (response) => response,
